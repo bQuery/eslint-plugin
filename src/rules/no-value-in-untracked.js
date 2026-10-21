@@ -8,12 +8,40 @@
  *   inside it never trigger it (for `watch` they only cause redundant
  *   re-evaluations of the internal effect).
  *
+ * Only identifiers that provably hold a bQuery signal are reported: a
+ * `const` (or never reassigned `let` / `var`) initialised with a call to one
+ * of bQuery's signal factories (`signal()`, `computed()`, `useSignal()`, …).
+ * Anything else — DOM elements, `Map` entries, parameters, imports from other
+ * modules, globals — may have a `.value` without a `.peek()`, so it is left
+ * alone.
+ *
  * @module @bquery/eslint-plugin/rules/no-value-in-untracked
  */
 
 import { bquerySources, docsUrl, findVariable, isFunction, matchBQueryCall } from '../utils.js';
 
 const SOURCES = bquerySources('reactive');
+
+/**
+ * bQuery factories whose result has a tracked `.value` and an untracked
+ * `.peek()` (they return `Signal`, `Computed`, `LinkedSignal` or
+ * `ReadonlySignal`), grouped by the module that exports them. Checked against
+ * the published `@bquery/bquery` 1.17 declaration files.
+ *
+ * @type {Array<[Set<string>, Set<string>]>}
+ */
+const SIGNAL_FACTORIES = [
+  [
+    bquerySources('reactive'),
+    new Set(['signal', 'computed', 'linkedSignal', 'persistedSignal', 'readonly']),
+  ],
+  [bquerySources('component'), new Set(['useSignal', 'useComputed', 'useSlot'])],
+  [bquerySources('platform'), new Set(['useCookie'])],
+  [bquerySources('motion'), new Set(['reducedMotionSignal'])],
+  [bquerySources('a11y'), new Set(['keyboardUserSignal', 'focusVisible'])],
+  [bquerySources('router'), new Set(['isActiveSignal'])],
+  [bquerySources('dnd'), new Set(['draggablePosition', 'sortableOrder'])],
+];
 
 /** Untracking helpers → index of the untracked callback argument. */
 const CALLBACK_INDEX = new Map([
@@ -81,6 +109,52 @@ const untrackedHelper = (context, fn) => {
 };
 
 /**
+ * Unwrap TypeScript-only wrappers (`x as T`, `x!`, `x satisfies T`, `<T>x`).
+ *
+ * @param {import('../utils.js').AnyNode} node - Expression
+ * @returns {import('../utils.js').AnyNode} The wrapped runtime expression
+ */
+const unwrap = (node) => {
+  let current = node;
+  while (
+    current?.type === 'TSAsExpression' ||
+    current?.type === 'TSNonNullExpression' ||
+    current?.type === 'TSSatisfiesExpression' ||
+    current?.type === 'TSTypeAssertion'
+  ) {
+    current = current.expression;
+  }
+  return current;
+};
+
+/**
+ * Whether a variable provably holds a bQuery signal: it has a single
+ * `const` / `let` / `var` declaration with a plain identifier, is initialised
+ * with a call to a bQuery signal factory (named, renamed or namespace
+ * import), and is never reassigned.
+ *
+ * @param {import('eslint').Rule.RuleContext} context - Rule context
+ * @param {import('eslint').Scope.Variable} variable - Variable to inspect
+ * @returns {boolean} True for confirmed signals
+ */
+const holdsSignal = (context, variable) => {
+  if (variable.defs.length !== 1) return false;
+  const [def] = variable.defs;
+  if (def.type !== 'Variable' || def.node.id.type !== 'Identifier') return false;
+  if (def.parent.kind !== 'const') {
+    // `let` / `var`: the initialiser is the only write.
+    if (variable.references.some((reference) => reference.isWrite() && !reference.init)) {
+      return false;
+    }
+  }
+  const init = unwrap(def.node.init);
+  if (init?.type !== 'CallExpression') return false;
+  return SIGNAL_FACTORIES.some(([sources, names]) =>
+    Boolean(matchBQueryCall(context, init, sources, names))
+  );
+};
+
+/**
  * Whether `inner` lies inside `outer` (by source range).
  *
  * @param {import('../utils.js').AnyNode} inner - Candidate descendant
@@ -97,7 +171,7 @@ export default {
     hasSuggestions: true,
     docs: {
       description:
-        'Flag `.value` reads inside `untrack()` and `watch()` callbacks, which do not subscribe, and suggest `.peek()`',
+        'Flag `.value` reads of bQuery signals inside `untrack()` and `watch()` callbacks, which do not subscribe, and suggest `.peek()`',
       recommended: true,
       url: docsUrl('no-value-in-untracked'),
     },
@@ -129,6 +203,9 @@ export default {
         const variable = findVariable(sourceCode.getScope(node), name);
         if (!variable || variable.defs.length === 0) return;
         if (variable.defs.some((def) => isWithin(def.name, fn))) return;
+        // Only identifiers that provably hold a bQuery signal: `.peek()` does
+        // not exist on a DOM input, a `Map` entry or an unknown import.
+        if (!holdsSignal(context, variable)) return;
 
         const data = { name, helper };
         context.report({

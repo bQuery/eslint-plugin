@@ -7,7 +7,7 @@ ESLint rules for [bQuery.js](https://bquery.js.org) that turn its documented inv
 | [`no-top-level-dollar`](#no-top-level-dollar)           | `warn`      | —          | `$()` calls that run on import and throw when the element is gone |
 | [`no-dynamic-trusted-html`](#no-dynamic-trusted-html)   | `error`     | suggestion | `trusted()` / `unsafeHtml()` on dynamic, unsanitized values       |
 | [`prefer-scoped-reactivity`](#prefer-scoped-reactivity) | `warn`      | suggestion | `signal()` / `computed()` / `effect()` that leak from a component |
-| [`no-value-in-untracked`](#no-value-in-untracked)       | `warn`      | suggestion | `.value` reads in `untrack()` / `watch()` callbacks               |
+| [`no-value-in-untracked`](#no-value-in-untracked)       | `warn`      | suggestion | Signal `.value` reads in `untrack()` / `watch()` callbacks        |
 | [`prefer-subpath-imports`](#prefer-subpath-imports)     | `warn`      | autofix    | Imports from the root entry instead of `@bquery/bquery/<module>`  |
 
 All rules follow imports: they only fire for functions imported from `@bquery/bquery`, its module subpaths or `@bquery/bquery/full` (named, renamed or namespace imports). A local function that happens to be called `$` or `trusted` is ignored.
@@ -173,7 +173,15 @@ Reading `signal.value` subscribes the current observer. Some callbacks do not su
 - `untrack(fn)` runs `fn` with dependency tracking off;
 - the callback of `watch(source, cb)`, `watchDebounce()` and `watchThrottle()` only re-runs when `source` changes. Other signals read inside it never trigger the callback (with `watch()` they only cause redundant re-evaluations of the internal effect).
 
-A `.value` read there looks reactive but is not. The rule reports `.value` reads on identifiers directly inside such callbacks and suggests `.peek()`, which states the intent and never subscribes. Writes (`x.value = …`, `x.value++`), the callback's own parameters and locals, and reads in nested functions are ignored.
+A `.value` read there looks reactive but is not. The rule reports `.value` reads of bQuery signals directly inside such callbacks and suggests `.peek()`, which states the intent and never subscribes.
+
+An identifier counts as a signal only when the rule can prove it: it is declared in the same file as a `const` (or a `let` / `var` that is never reassigned) and initialised with a call to a bQuery signal factory imported from `@bquery/bquery`, a module subpath or `/full` (named, renamed or namespace import):
+
+- `@bquery/bquery/reactive`: `signal()`, `computed()`, `linkedSignal()`, `persistedSignal()`, `readonly()`;
+- `@bquery/bquery/component`: `useSignal()`, `useComputed()`, `useSlot()`;
+- `useCookie()` (platform), `reducedMotionSignal()` (motion), `keyboardUserSignal()` / `focusVisible()` (a11y), `isActiveSignal()` (router), `draggablePosition()` / `sortableOrder()` (dnd).
+
+Everything else is ignored, because its `.value` may not belong to a signal and `.peek()` would throw: DOM elements (`input.value`), `Map` entries and plain objects, function parameters, signals imported from other modules or passed around, destructured bindings and unresolved globals. Writes (`x.value = …`, `x.value++`), the callback's own parameters and locals, and reads in nested functions are ignored too.
 
 ```ts
 // ❌ Bad — changing `page` does not re-run the callback
@@ -194,6 +202,12 @@ watch(query, (next) => {
 });
 
 const snapshot = untrack(() => count.peek());
+```
+
+```ts
+// ✅ Not reported — `input` is a DOM element, not a signal
+const input = document.querySelector('input');
+watch(query, () => search(input.value));
 ```
 
 ### prefer-subpath-imports
