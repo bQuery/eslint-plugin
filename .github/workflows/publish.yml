@@ -1,0 +1,56 @@
+# Manual npm publish with provenance via npm Trusted Publishing (OIDC) — no
+# NPM_TOKEN secret is used.
+#
+# ⚠️ SETUP REQUIRED BEFORE THIS WORKS: on npmjs.com, open the
+# `@bquery/eslint-plugin` package settings → "Trusted Publisher" and add
+# GitHub Actions with organization `bQuery`, repository `eslint-plugin` and
+# workflow filename `publish.yml`. Until that is configured, `npm publish`
+# below fails with an authentication error. (A brand-new package name may
+# need its first version published once by hand before a Trusted Publisher
+# can be attached.)
+#
+# Run it from the Actions tab ("Publish to npm" → "Run workflow") after
+# bumping `version` in package.json and moving the CHANGELOG entries out of
+# "Unreleased". `dry-run` (default: on) only packs and validates.
+
+name: Publish to npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Run `npm publish --dry-run` instead of publishing'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC token for npm Trusted Publishing and provenance
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          # Trusted Publishing needs npm >= 11.5.1 (bundled with Node 24+).
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: '1.4'
+
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun run format:check
+      - run: bun test
+      - run: bun run check:export-map
+
+      - name: Publish to npm (Trusted Publisher)
+        run: npm publish --access public --provenance ${{ inputs.dry-run && '--dry-run' || '' }}
