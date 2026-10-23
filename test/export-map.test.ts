@@ -29,6 +29,11 @@ describe('export-map.json', () => {
       sanitize: 'security',
       trusted: 'security',
       prefersReducedMotion: 'motion',
+      // Added in bQuery 1.18.
+      createSchemaForm: 'forms',
+      StandardSchemaV1: 'forms',
+      validate: 'server',
+      EmptyStoreRecord: 'store',
     });
   });
 });
