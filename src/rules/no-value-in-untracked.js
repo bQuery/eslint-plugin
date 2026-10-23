@@ -26,7 +26,7 @@ const SOURCES = bquerySources('reactive');
  * bQuery factories whose result has a tracked `.value` and an untracked
  * `.peek()` (they return `Signal`, `Computed`, `LinkedSignal` or
  * `ReadonlySignal`), grouped by the module that exports them. Checked against
- * the published `@bquery/bquery` 1.17 declaration files.
+ * the published `@bquery/bquery` 1.18 declaration files.
  *
  * @type {Array<[Set<string>, Set<string>]>}
  */

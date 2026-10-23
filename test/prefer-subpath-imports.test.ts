@@ -37,6 +37,26 @@ ruleTester.run('prefer-subpath-imports', rule, {
       errors: [{ messageId: 'preferSubpath' }],
     },
     {
+      // Standard Schema forms, added to the root entry in bQuery 1.18.
+      code: `import { createSchemaForm, useSchemaForm, type SchemaFormValues } from '@bquery/bquery';`,
+      output: `import { createSchemaForm, useSchemaForm, type SchemaFormValues } from '@bquery/bquery/forms';`,
+      errors: [{ messageId: 'preferSubpath', data: { source: '@bquery/bquery/forms' } }],
+    },
+    {
+      // One Standard Schema for client and server (bQuery 1.18).
+      code: `import { createSchemaForm, validate, type StandardSchemaV1 } from '@bquery/bquery';`,
+      output: [
+        `import { createSchemaForm, type StandardSchemaV1 } from '@bquery/bquery/forms';`,
+        `import { validate } from '@bquery/bquery/server';`,
+      ].join('\n'),
+      errors: [
+        {
+          messageId: 'preferSubpaths',
+          data: { sources: "'@bquery/bquery/forms', '@bquery/bquery/server'" },
+        },
+      ],
+    },
+    {
       // Comments survive a single-subpath fix.
       code: `import {
   component, // define elements
